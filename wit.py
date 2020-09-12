@@ -1,10 +1,12 @@
-# Upload 174
 import datetime
 import filecmp
 import os
 import random
 import shutil
 import sys
+
+import matplotlib.pyplot as plt
+import networkx as nx
 
 
 MAIN_DIR = '.wit'
@@ -48,7 +50,7 @@ def make_a_copy(full_path: str, directory_path: str) -> None:
             os.makedirs(directory_path)
         for subpath in os.listdir(full_path):
             make_a_copy(full_path + '\\' + subpath, directory_path)
-           
+        
 
 def add(path: str) -> None: 
     # copy the content of path to .wit--> stagin area
@@ -82,16 +84,15 @@ def commit_file(file_name, commit_message, commit_parent=None) -> None:
 
     with open(file_name, 'w') as f:
         content = f'''
-        parent = {commit_parent}
+        parent={commit_parent}
         date={str(datetime.datetime.now())}
         message={commit_message}'''
         f.write(content)
 
 
 def look_for_commit_id(path, commit_type):
-    references_path = path + '\\references.txt'
     try:
-        with open(references_path, 'r') as f:
+        with open(path, 'r') as f:
                 lines = f.readlines()
                 for line in lines:
                     line = line.strip()
@@ -108,8 +109,7 @@ def write_to_references(path, head_commit_id, master_commit_id):
     HEAD={head_commit_id}
     master={master_commit_id}'''
     if os.path.isfile(path_to_references):
-        last_commit = look_for_commit_id(path, 'HEAD')     
-        print(f"Commit: {last_commit} created") 
+        last_commit = look_for_commit_id(path_to_references, 'HEAD')     
     else:
         last_commit = None
     with open(path_to_references, 'w') as f:
@@ -126,6 +126,7 @@ def commit(path, mesage):
     commit_file(file_name, mesage, parent_commit)
     for content in os.listdir(wit_folder + '\\stagin_area'):
         make_a_copy(os.path.abspath(content), path_to_images + '\\' + commit_id)
+    print(f"Commit: {commit_id} created") 
     
         
 def compare_folders(path1, path2):
@@ -141,7 +142,6 @@ def compare_files(path1, path2):
         diff = filecmp.dircmp(path1 + f'\\{subdir}', path2 + f'\\{subdir}').diff_files
         if diff:
             with_changes.append(f'{subdir}: {diff}')
-    print('7', with_changes)
     return with_changes
     
 
@@ -188,12 +188,31 @@ def checkout(path, commit_id):
         else:
             copy_checkout(commit_folder, path)
             head_id = commit_id
-            master_id = look_for_commit_id(path, 'master')
+            master_id = look_for_commit_id(path + '\\references.txt', 'master')
             write_to_references(path, head_id, master_id)
 
 
+def found_parent(path, commit_id):
+    path_to_commit = path + f'\\images\\{commit_id}.txt'
+    return look_for_commit_id(path_to_commit, 'parent')
+
+
 def graph(path):
-    pass
+    head_commit = look_for_commit_id(path + '\\references.txt', 'HEAD')
+    points = [('HEAD', head_commit[:6])]
+    while found_parent(path, head_commit):
+        points.append((head_commit[:6], found_parent(path, head_commit)[:6]))
+        head_commit = found_parent(path, head_commit)
+    print_graph(points[:-1])
+    
+        
+def print_graph(dots):
+    G = nx.DiGraph() 
+    G.add_edges_from(dots) 
+  
+    plt.figure(figsize =(10,10)) 
+    nx.draw_networkx(G, node_color ='blue', node_size=5000) 
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -220,7 +239,7 @@ if __name__ == "__main__":
             print("You don't have wit directory. can't do checkout.\n")
         else:
             if sys.argv[-1] == 'master':
-                commit_id = look_for_commit_id(wit_path, 'master')
+                commit_id = look_for_commit_id(wit_path + '\\references.txt', 'master')
                 if not commit_id:
                     raise FileNotFoundError("master ID not found")
             else:
@@ -233,7 +252,4 @@ if __name__ == "__main__":
         except FileNotFoundError:
             print("No .wit directory found :(\n")
         else:
-            pass
-
-           
-            
+            graph(wit_path)
