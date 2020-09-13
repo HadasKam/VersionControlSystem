@@ -14,6 +14,11 @@ INNER_DIRS = ['images', 'stagin_area']
 PATH = os.getcwd()
 
 
+def write_to_activated(wit_path, name):
+    with open(wit_path+'\\activated.txt', 'w') as f:
+        f.write(name)
+
+
 def init(path: str = PATH) -> None:
     # make a .wit folder
     names = (path + '\\' + MAIN_DIR + '\\' + inner_dir for inner_dir in INNER_DIRS)
@@ -22,6 +27,8 @@ def init(path: str = PATH) -> None:
             os.makedirs(name)
         except FileExistsError:
             print("Directory is already exist:", name)
+        else:
+            write_to_activated(path +f'\\{MAIN_DIR}', 'master')
     
 
 def path_to_wit(path: str) -> str:
@@ -81,7 +88,6 @@ def make_a_commit_folder(path: str) -> str:
 
 
 def commit_file(file_name, commit_message, commit_parent=None) -> None:
-
     with open(file_name, 'w') as f:
         content = f'''
         parent={commit_parent}
@@ -97,36 +103,43 @@ def look_for_commit_id(path, commit_type):
                 for line in lines:
                     line = line.strip()
                     if line.startswith(commit_type):
-                        return line.strip(commit_type + '=') 
+                        return line.replace(commit_type + '=','') 
     except FileNotFoundError:
         return None
     return None
 
-
-def write_to_references(path, head_commit_id, master_commit_id):
-    path_to_references = path + '\\references.txt'
-    content = f'''
-    HEAD={head_commit_id}
-    master={master_commit_id}'''
+        
+def write_to_references(wit_path, new_commit, branch_name):
+    path_to_references = wit_path + '\\references.txt'
     if os.path.isfile(path_to_references):
-        last_commit = look_for_commit_id(path_to_references, 'HEAD')     
+        last_commit = look_for_commit_id(path_to_references, 'HEAD')  
+        with open(path_to_references, 'r') as f:
+            content = f.read()
+            content = content.replace(f'HEAD={last_commit}', f'HEAD={new_commit}')
+            content = content.replace(f'{branch_name}={last_commit}', f'{branch_name}={new_commit}')  
     else:
+        content = f'''
+        HEAD={new_commit}
+        master={new_commit}
+        '''
         last_commit = None
     with open(path_to_references, 'w') as f:
-            f.write(content)
+                f.write(content)
     return last_commit
-        
+
 
 def commit(path, mesage):
     wit_folder = path_to_wit(os.path.abspath(path))
+    with open(wit_folder+'\\activated.txt','r') as f:
+        branch_name = f.read()
     path_to_images = wit_folder + '\\images' 
-    commit_id = make_a_commit_folder(path_to_images)
-    file_name = path_to_images + '\\' + commit_id + '.txt'
-    parent_commit = write_to_references(wit_folder, commit_id, commit_id)
+    new_commit_id = make_a_commit_folder(path_to_images)
+    file_name = path_to_images + '\\' + new_commit_id + '.txt'
+    parent_commit = write_to_references(wit_folder, new_commit_id, branch_name)
     commit_file(file_name, mesage, parent_commit)
     for content in os.listdir(wit_folder + '\\stagin_area'):
-        make_a_copy(os.path.abspath(content), path_to_images + '\\' + commit_id)
-    print(f"Commit: {commit_id} created") 
+        make_a_copy(os.path.abspath(content), path_to_images + '\\' + new_commit_id)
+    print(f"Commit: {new_commit_id} created") 
     
         
 def compare_folders(path1, path2):
@@ -175,7 +188,7 @@ def copy_checkout(commit_path, wit_path):
             make_a_copy(commit_path + '\\' + subpath, path_to_stage_area)
 
 
-def checkout(path, commit_id):
+def checkout(path, commit_id, branch_name):
     commit_folder = path + '\\images\\' + commit_id
     try:
         os.chdir(commit_folder)
@@ -188,8 +201,7 @@ def checkout(path, commit_id):
         else:
             copy_checkout(commit_folder, path)
             head_id = commit_id
-            master_id = look_for_commit_id(path + '\\references.txt', 'master')
-            write_to_references(path, head_id, master_id)
+            write_to_references(path, head_id, branch_name)
 
 
 def found_parent(path, commit_id):
@@ -215,6 +227,19 @@ def print_graph(dots):
     plt.show()
 
 
+def add_branch(path, name):
+    path_to_references = path + '\\references.txt'
+    if os.path.isfile(path_to_references):
+        head_id = look_for_commit_id(path_to_references, 'HEAD')
+        with open(path_to_references, 'a') as f:
+                f.write(f'{name}={head_id}\n')
+    else:
+        print('No master yet, can not open branch')
+
+def branch(path, name):
+    add_branch(path, name)
+
+
 if __name__ == "__main__":
     if sys.argv[-1] == 'init':
         init(PATH)
@@ -238,13 +263,16 @@ if __name__ == "__main__":
         except FileNotFoundError:
             print("You don't have wit directory. can't do checkout.\n")
         else:
-            if sys.argv[-1] == 'master':
-                commit_id = look_for_commit_id(wit_path + '\\references.txt', 'master')
+            if len(sys.argv[-1]) != 40:
+                commit_id = look_for_commit_id(wit_path + '\\references.txt', sys.argv[-1])
+                print(commit_id)
+                write_to_activated(wit_path, sys.argv[-1])
+                checkout(wit_path, commit_id, sys.argv[-1])
                 if not commit_id:
                     raise FileNotFoundError("master ID not found")
             else:
                 commit_id = sys.argv[-1]
-                checkout(wit_path, commit_id)
+                checkout(wit_path, commit_id, 'master')
 
     if sys.argv[1] == 'graph':
         try:
@@ -253,3 +281,11 @@ if __name__ == "__main__":
             print("No .wit directory found :(\n")
         else:
             graph(wit_path)
+
+    if sys.argv[1] == 'branch':
+        try:
+            wit_path = path_to_wit(os.path.abspath(sys.argv[0]))
+        except FileNotFoundError:
+            print("No .wit directory found :(\n")
+        else:
+            branch(wit_path, sys.argv[-1])
