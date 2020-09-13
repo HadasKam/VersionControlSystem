@@ -209,19 +209,35 @@ def found_parent(path, commit_id):
     return look_for_commit_id(path_to_commit, 'parent')
 
 
+def found_branches(path):    
+    branches ={}
+    with open(path+'\\references.txt', 'r') as f:
+        content = f.readlines()
+    for line in content:
+        try:
+            c = line.index('=')
+        except ValueError:
+            pass
+        else:
+            branches[line[:c].strip()]= line[c+1:].strip('\n')
+    return(branches)
+
+
 def graph(path):
-    head_commit = look_for_commit_id(path + '\\references.txt', 'HEAD')
-    points = [('HEAD', head_commit[:6])]
-    while found_parent(path, head_commit):
-        points.append((head_commit[:6], found_parent(path, head_commit)[:6]))
-        head_commit = found_parent(path, head_commit)
-    print_graph(points[:-1])
+    points = []
+    branches = found_branches(path)
+    for branch_name, commit_id in branches.items():
+        points.append((branch_name, commit_id[:6]))
+        while found_parent(path, commit_id):
+            points.append((commit_id[:6], found_parent(path, commit_id)[:6]))
+            commit_id = found_parent(path, commit_id)
+        points = points[:-1]
+    print_graph(points)
     
         
 def print_graph(dots):
     G = nx.DiGraph() 
     G.add_edges_from(dots) 
-  
     plt.figure(figsize =(10,10)) 
     nx.draw_networkx(G, node_color ='blue', node_size=5000) 
     plt.show()
