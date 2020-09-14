@@ -128,20 +128,21 @@ def write_to_references(wit_path, new_commit, branch_name):
     return last_commit
 
 
-def commit(path, mesage):
-    wit_folder = path_to_wit(os.path.abspath(path))
-    with open(wit_folder+'\\activated.txt','r') as f:
+def commit(wit_path, mesage, merge_commit=None):
+    with open(wit_path+'\\activated.txt','r') as f:
         branch_name = f.read()
-    path_to_images = wit_folder + '\\images' 
+    path_to_images = wit_path + '\\images' 
     new_commit_id = make_a_commit_folder(path_to_images)
     file_name = path_to_images + '\\' + new_commit_id + '.txt'
-    parent_commit = write_to_references(wit_folder, new_commit_id, branch_name)
+    parent_commit = write_to_references(wit_path, new_commit_id, branch_name)
+    if merge_commit:
+        parent_commit += f',{merge_commit}'
     commit_file(file_name, mesage, parent_commit)
-    for content in os.listdir(wit_folder + '\\stagin_area'):
+    for content in os.listdir(wit_path + '\\stagin_area'):
         make_a_copy(os.path.abspath(content), path_to_images + '\\' + new_commit_id)
-    print(f"Commit: {new_commit_id} created") 
-    
-        
+    print(f"Commit: {new_commit_id} created")           
+
+
 def compare_folders(path1, path2):
     return filecmp.dircmp(path1, path2).right_only
     
@@ -204,9 +205,15 @@ def checkout(path, commit_id, branch_name):
             write_to_references(path, head_id, branch_name)
 
 
-def found_parent(path, commit_id):
-    path_to_commit = path + f'\\images\\{commit_id}.txt'
-    return look_for_commit_id(path_to_commit, 'parent')
+def found_parent(path:str, commit_id:str) -> list:
+    child_commits = commit_id.split(',')
+    commits = []
+    for child in child_commits:
+        path_to_commit = path + f'\\images\\{child}.txt'
+        parents = look_for_commit_id(path_to_commit, 'parent')
+        if parents and parents != 'None':
+            commits.extend(parents.split(','))
+    return commits
 
 
 def found_branches(path):    
@@ -229,8 +236,9 @@ def graph(path):
     for branch_name, commit_id in branches.items():
         points.append((branch_name, commit_id[:6]))
         while found_parent(path, commit_id):
-            points.append((commit_id[:6], found_parent(path, commit_id)[:6]))
-            commit_id = found_parent(path, commit_id)
+            for commit in found_parent(path, commit_id):
+                points.append((commit_id[:6], commit[:6]))
+            commit_id = ','.join(found_parent(path, commit_id))
         points = points[:-1]
     print_graph(points)
     
@@ -243,7 +251,9 @@ def print_graph(dots):
     plt.show()
 
 
-def add_branch(path, name):
+def branch(path, name):
+    if len(name)> 39:
+        raise ValueError('name should be loess then 40 chars, branch not made')
     path_to_references = path + '\\references.txt'
     if os.path.isfile(path_to_references):
         head_id = look_for_commit_id(path_to_references, 'HEAD')
@@ -252,9 +262,48 @@ def add_branch(path, name):
     else:
         print('No master yet, can not open branch')
 
-def branch(path, name):
-    add_branch(path, name)
 
+def found_common_commit(wit_path, commit_a, commit_b):
+    commita_perents= [commit_a]
+    commitb_perents = [commit_b]
+    while found_parent(wit_path, commit_a) or found_parent(wit_path, commit_b):
+        if list(set(commita_perents).intersection(commitb_perents)):
+            return list(set(commita_perents).intersection(commitb_perents))[0]  
+            # credit to SilentGhost, https://stackoverflow.com/questions/2864842/common-elements-comparison-between-2-lists
+        commit_a = found_parent(wit_path, commit_a)
+        commita_perents.extend(commit_a)
+        commit_a = ','.join(commit_a)
+        if list(set(commita_perents).intersection(commitb_perents)):
+            return list(set(commita_perents).intersection(commitb_perents))[0]
+        commit_b = found_parent(wit_path, commit_b)
+        commitb_perents.extend(commit_b)
+        if list(set(commita_perents).intersection(commitb_perents)):
+            return list(set(commita_perents).intersection(commitb_perents))[0]
+        commit_b = ','.join(commit_b)
+    return None  # never happend
+
+
+def update_commit_to_merge(wit_path, commit):
+    # adding all new/changes files to staging_folder
+    stage_area_path = wit_path + '\\stagin_area'
+    file_changes = filecmp.dircmp(stage_area_path,wit_path + f'\\images\\{commit}').right_only
+    file_changes.extend(filecmp.dircmp(stage_area_path,wit_path + f'\\images\\{commit}').diff_files)
+    for a_file in file_changes:
+        add(a_file)
+
+
+def merge(wit_path, branch_name):
+    branch_commit = found_branches(wit_path)[branch_name]
+    head_commit = found_branches(wit_path)['HEAD']
+    common_commit = found_common_commit(wit_path, branch_commit, head_commit)
+    path_to_stage_area = wit_path + '\\stagin_area'
+    path_to_common_commit = wit_path + f'\\images\\{common_commit}'
+    for subpath in os.listdir(path_to_common_commit):
+        make_a_copy(path_to_common_commit + '\\' + subpath, path_to_stage_area)
+    update_commit_to_merge(wit_path, branch_commit)
+    update_commit_to_merge(wit_path, head_commit)
+    commit(wit_path, 'Merging commit', branch_commit)
+  
 
 if __name__ == "__main__":
     if sys.argv[-1] == 'init':
@@ -262,7 +311,8 @@ if __name__ == "__main__":
     if sys.argv[1] == 'add':
         add(sys.argv[-1])
     if sys.argv[1] == 'commit':
-        commit(sys.argv[0], sys.argv[-1])
+        wit_path = path_to_wit(os.path.abspath(sys.argv[0]))
+        commit(wit_path, sys.argv[-1])
     if sys.argv[1] == 'status':
         try:
             wit_path = path_to_wit(os.path.abspath(sys.argv[0]))
@@ -305,3 +355,12 @@ if __name__ == "__main__":
             print("No .wit directory found :(\n")
         else:
             branch(wit_path, sys.argv[-1])
+
+    if sys.argv[1] == 'merge':
+        try:
+            wit_path = path_to_wit(os.path.abspath(sys.argv[0]))
+        except FileNotFoundError:
+            print("No .wit directory found :(\n")
+        else:
+            merge(wit_path, sys.argv[-1])
+            
